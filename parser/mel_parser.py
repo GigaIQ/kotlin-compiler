@@ -1,3 +1,5 @@
+import inspect
+from _ast import BinOp
 from contextlib import suppress
 
 import pyparsing as pp
@@ -7,34 +9,38 @@ from mel_ast import *
 
 
 def _make_parser():
-    # num = ppc.fnumber.setParseAction(lambda s, loc, tocs: tocs[0])
+    IF = pp.Keyword('if')
+    FOR = pp.Keyword('for')
+    WHILE = pp.Keyword('while')
+    DO = pp.Keyword('do')
+    RETURN = pp.Keyword('return')
+    VAR = pp.Keyword('var')
+    VAL = pp.Keyword('val')
+    FUN = pp.Keyword('fun')
+    UNTIL, DOWNTO, STEP = pp.Keyword('until'), pp.Keyword('downTo'), pp.Keyword('step').suppress()
+    IN = pp.Keyword('in')
+    keywords = IF | FOR | WHILE | DO | RETURN | VAR | VAL | FUN | UNTIL | DOWNTO | IN
+    SEMI, COMMA, COLON, DOTS = pp.Literal(';').suppress(), pp.Literal(',').suppress(), pp.Literal(':'), pp.Literal('..')
+
     num = pp.Regex('[+-]?\\d+\\.?\\d*([eE][+-]?\\d+)?')
-    # c escape-последовательностями как-то неправильно работает
+
     str_ = pp.QuotedString('"', escChar='\\', unquoteResults=False, convertWhitespaceEscapes=False)
-    literal = num | str_
+    bool_ = pp.Regex('true|false')
+    literal = num | str_ | bool_
 
-    ident = ppc.identifier.setName('ident')
-
-    identInt = ppc.identifier.setName('int')
-    identChar = ppc.identifier.setName("char")
-    identBool = ppc.identifier.setName("bool")
-
-    idents = ident | identInt | identChar | identBool
-
-    adv = pp.Keyword("var").suppress() + ident + idents
+    ident = (~keywords + ppc.identifier.copy()).setName('ident')
+    type_ = pp.Forward()
 
     LPAR, RPAR = pp.Literal('(').suppress(), pp.Literal(')').suppress()
     LBRACK, RBRACK = pp.Literal("[").suppress(), pp.Literal("]").suppress()
     LBRACE, RBRACE = pp.Literal("{").suppress(), pp.Literal("}").suppress()
-    SEMI, COMMA = pp.Literal(';').suppress(), pp.Literal(',').suppress()
+    type_ << ident.setName('type')
     ASSIGN = pp.Literal('=')
 
     ADD, SUB = pp.Literal('+'), pp.Literal('-')
-    MUL, DIV = pp.Literal('*'), pp.Literal('/')
+    MUL, DIV, MOD = pp.Literal('*'), pp.Literal('/'), pp.Literal('%')
     AND = pp.Literal('&&')
     OR = pp.Literal('||')
-    BIT_AND = pp.Literal('&')
-    BIT_OR = pp.Literal('|')
     GE, LE, GT, LT = pp.Literal('>='), pp.Literal('<='), pp.Literal('>'), pp.Literal('<')
     NEQUALS, EQUALS = pp.Literal('!='), pp.Literal('==')
 
@@ -43,39 +49,58 @@ def _make_parser():
     stmt = pp.Forward()
     stmt_list = pp.Forward()
 
-    # call = idents + LPAR + pp.Optional(expr + pp.ZeroOrMore(COMMA + expr)) + RPAR
+    call = ident + LPAR + pp.Optional(expr + pp.ZeroOrMore(COMMA + expr)) + RPAR
+    group = (
+            literal |
+            call |
+            ident |
+            LPAR + expr + RPAR
+    )
 
-    group = ( ident | literal | LPAR + expr + RPAR )
-
-    mult = group + pp.ZeroOrMore(MUL + group).setName("bin_op")
-    add << mult + pp.ZeroOrMore(ADD + mult)
-
-    compare1 = pp.Group(add + pp.Optional((GE | LE | GT | LT) + add)).setName(
-        'bin_op')  # GE и LE первыми, т.к. приоритетный выбор
+    mult = pp.Group(group + pp.ZeroOrMore((MUL | DIV | MOD) + group)).setName('bin_op')
+    add << pp.Group(mult + pp.ZeroOrMore((ADD | SUB) + mult)).setName('bin_op')
+    seq = pp.Group(add + pp.Optional((DOTS | UNTIL | DOWNTO) + add + pp.Optional(STEP + expr))).setName('bin_op')
+    compare1 = pp.Group(seq + pp.Optional((GE | LE | GT | LT) + seq)).setName('bin_op')
     compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NEQUALS) + compare1)).setName('bin_op')
     logical_and = pp.Group(compare2 + pp.ZeroOrMore(AND + compare2)).setName('bin_op')
     logical_or = pp.Group(logical_and + pp.ZeroOrMore(OR + logical_and)).setName('bin_op')
 
     expr << logical_or
 
-    assign = ident + ASSIGN.suppress() + add
+    simple_assign = (ident + ASSIGN.suppress() + expr).setName('assign')
+    var_ = (VAR | VAL) + ((ident + COLON + type_ + pp.Optional(ASSIGN.suppress() + expr)) |
+                          (ident + pp.Optional(ASSIGN.suppress() + expr)))
 
-    if_ = pp.Keyword("if").suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else")).suppress() + LBRACK + stmt_list + RBRACE
+    assign = ident + ASSIGN.suppress() + expr
+    simple_stmt = assign | call
 
-    for_condition = pp.Optional(assign + pp.Literal(";").suppress() & stmt + pp.Literal(";").suppress() & stmt)
-    for_body = stmt_list
+    self_operators = pp.Group(ident + expr).setName('bin_op')
+    if_ = IF.suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else").suppress() + stmt)
+    for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
+    while_ = WHILE.suppress() + LPAR + expr + RPAR + stmt
+    do_while = DO.suppress() + stmt + WHILE.suppress() + LPAR + expr + RPAR
+    return_ = RETURN.suppress() + pp.Optional(expr)
+    composite = LBRACE + stmt_list + RBRACE
 
-    for_ = pp.Keyword("for").suppress() + for_condition + LBRACE + for_body + RBRACE
+    param = ident + COLON.suppress() + type_
+    params = param + pp.ZeroOrMore(COMMA + param)
+    func = FUN.suppress() + ident + LPAR + pp.Optional(params) + RPAR + pp.Optional(
+        COLON.suppress() + type_) + LBRACE + stmt_list + RBRACE
 
-    ident_list = ident + pp.ZeroOrMore(COMMA + ident)
+    stmt << (
+            if_ |
+            for_ |
+            do_while |
+            while_ |
+            return_ |
+            simple_stmt |
+            var_ |
+            composite |
+            func |
+            self_operators
+    )
 
-    var_function_decl = ident + idents
-    params = pp.ZeroOrMore(var_function_decl + pp.ZeroOrMore(COMMA + var_function_decl))
-    function_call = pp.Keyword("func").suppress() + ident + LPAR + params + RPAR
-
-    stmt << ( assign | adv | if_| for_ | function_call )
-
-    stmt_list = pp.ZeroOrMore(stmt)
+    stmt_list << (pp.ZeroOrMore(stmt + pp.ZeroOrMore(SEMI)))
 
     program = stmt_list.ignore(pp.cStyleComment).ignore(pp.dblSlashComment) + pp.StringEnd()
 
@@ -86,7 +111,7 @@ def _make_parser():
             return
         if getattr(parser, 'name', None) and parser.name.isidentifier():
             rule_name = parser.name
-        if rule_name in ('bin_op', ):
+        if rule_name in ('bin_op',):
             def bin_op_parse_action(s, loc, tocs):
                 node = tocs[0]
                 if not isinstance(node, AstNode):
@@ -97,6 +122,7 @@ def _make_parser():
                         secondNode = bin_op_parse_action(s, loc, secondNode)
                     node = BinOpNode(BinOp(tocs[i]), node, secondNode)
                 return node
+
             parser.setParseAction(bin_op_parse_action)
         else:
             cls = ''.join(x.capitalize() for x in rule_name.split('_')) + 'Node'
@@ -105,6 +131,7 @@ def _make_parser():
                 if not inspect.isabstract(cls):
                     def parse_action(s, loc, tocs):
                         return cls(*tocs)
+
                     parser.setParseAction(parse_action)
 
     for var_name, value in locals().copy().items():
