@@ -4,7 +4,13 @@ import mel_parser
 
 def main():
     prog = '''
-            var a
+            a = 2
+            b = 3
+            if (a > 5) {
+                b = 4
+            } else {
+                a = 4
+            }
         '''
     prog = mel_parser.parse(prog)
     print(*prog.tree, sep=os.linesep)
