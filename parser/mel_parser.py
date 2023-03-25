@@ -1,4 +1,3 @@
-import inspect
 from contextlib import suppress
 
 import pyparsing as pp
@@ -7,56 +6,47 @@ from pyparsing import pyparsing_common as ppc
 from mel_ast import *
 
 
-def make_parser():
+def _make_parser():
+    # num = ppc.fnumber.setParseAction(lambda s, loc, tocs: tocs[0])
     num = pp.Regex('[+-]?\\d+\\.?\\d*([eE][+-]?\\d+)?')
+    # c escape-последовательностями как-то неправильно работает
     str_ = pp.QuotedString('"', escChar='\\', unquoteResults=False, convertWhitespaceEscapes=False)
     literal = num | str_
-    bool_val = pp.Literal("true") | pp.Literal("false")
-    literal = num | bool_val
+
     ident = ppc.identifier.setName('ident')
 
-    INT = pp.Keyword("Integer").suppress()
-    CHAR = pp.Keyword("Char").suppress()
-    BOOL = pp.Keyword("Boolean").suppress()
+    identInt = ppc.identifier.setName('int')
+    identChar = ppc.identifier.setName("char")
+    identBool = ppc.identifier.setName("bool")
 
-    VAR = pp.Keyword("var").suppress()
-    VAL = pp.Keyword("val").suppress()
-
-    type_spec = INT | BOOL | CHAR
-
-    ADD = pp.Keyword("+").suppress()
-    SUB = pp.Keyword("-").suppress()
-    MUL = pp.Keyword("*").suppress()
-    DIV = pp.Keyword("/").suppress()
-    AND = pp.Keyword("&&").suppress()
-    OR = pp.Keyword("||").suppress()
-    GE = pp.Keyword(">=").suppress()
-    LE = pp.Keyword("<=").suppress()
-    NEQUALS = pp.Keyword("!=").suppress()
-    EQUALS = pp.Keyword("==").suppress()
-    GT = pp.Keyword(">").suppress()
-    LT = pp.Keyword("<").suppress()
+    idents = ident | identInt | identChar | identBool
 
     LPAR, RPAR = pp.Literal('(').suppress(), pp.Literal(')').suppress()
     LBRACK, RBRACK = pp.Literal("[").suppress(), pp.Literal("]").suppress()
     LBRACE, RBRACE = pp.Literal("{").suppress(), pp.Literal("}").suppress()
-
+    SEMI, COMMA = pp.Literal(';').suppress(), pp.Literal(',').suppress()
     ASSIGN = pp.Literal('=')
 
-    type_ = pp.Forward()
+    ADD, SUB = pp.Literal('+'), pp.Literal('-')
+    MUL, DIV = pp.Literal('*'), pp.Literal('/')
+    AND = pp.Literal('&&')
+    OR = pp.Literal('||')
+    BIT_AND = pp.Literal('&')
+    BIT_OR = pp.Literal('|')
+    GE, LE, GT, LT = pp.Literal('>='), pp.Literal('<='), pp.Literal('>'), pp.Literal('<')
+    NEQUALS, EQUALS = pp.Literal('!='), pp.Literal('==')
+
+    add = pp.Forward()
+    expr = pp.Forward()
     stmt = pp.Forward()
     stmt_list = pp.Forward()
-    expr = pp.Forward()
 
-    group = (
-        num |
-        str_ |
-        ident |
-        LPAR + expr + RPAR
-    )
+    group = ( ident | literal | LPAR + expr + RPAR )
 
-    mult = group + pp.ZeroOrMore(MUL | DIV + group).setName("bin_op")
-    add = mult + pp.ZeroOrMore(ADD | SUB + mult).setName("bin_op")
+    adv = pp.Keyword("var").suppress() + ident + idents
+
+    mult = group + pp.ZeroOrMore(MUL + group).setName("bin_op")
+    add << mult + pp.ZeroOrMore(ADD + mult)
 
     compare1 = pp.Group(add + pp.Optional((GE | LE | GT | LT) + add)).setName('bin_op')
     compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NEQUALS) + compare1)).setName('bin_op')
@@ -65,22 +55,22 @@ def make_parser():
 
     expr << logical_or
 
-    stmt_group = LBRACE + stmt_list + RBRACE
+    assign = ident + ASSIGN.suppress() + add
 
-    type_ << ident
+    if_ = pp.Keyword("if").suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else")).suppress() + LBRACK + stmt_list + RBRACE
 
-    var_type = ident + pp.Keyword(":").suppress() + type_
+    for_condition = pp.Optional(assign + pp.Literal(";").suppress() & stmt + pp.Literal(";").suppress() & stmt)
+    for_body = stmt_list
 
-    assing = ident + ASSIGN + expr
+    for_ = pp.Keyword("for").suppress() + for_condition + LBRACE + for_body + RBRACE
 
-    var_decl = VAR + var_type + ASSIGN + expr
+    ident_list = ident + pp.ZeroOrMore(COMMA + ident)
 
-    simple_stmt = assing
+    var_function_decl = ident + idents
+    params = pp.ZeroOrMore(var_function_decl + pp.ZeroOrMore(COMMA + var_function_decl))
+    function_call = pp.Keyword("fun").suppress() + ident + LPAR + params + RPAR
 
-    stmt << (
-        var_decl
-        | simple_stmt
-    )
+    stmt << ( assign | adv | if_| for_ | function_call )
 
     stmt_list = pp.ZeroOrMore(stmt)
 
@@ -88,13 +78,12 @@ def make_parser():
 
     start = program
 
-
     def set_parse_action_magic(rule_name: str, parser: pp.ParserElement) -> None:
         if rule_name == rule_name.upper():
             return
         if getattr(parser, 'name', None) and parser.name.isidentifier():
             rule_name = parser.name
-        if rule_name in ('bin_op',):
+        if rule_name in ('bin_op', ):
             def bin_op_parse_action(s, loc, tocs):
                 node = tocs[0]
                 if not isinstance(node, AstNode):
@@ -105,7 +94,6 @@ def make_parser():
                         secondNode = bin_op_parse_action(s, loc, secondNode)
                     node = BinOpNode(BinOp(tocs[i]), node, secondNode)
                 return node
-
             parser.setParseAction(bin_op_parse_action)
         else:
             cls = ''.join(x.capitalize() for x in rule_name.split('_')) + 'Node'
@@ -114,7 +102,6 @@ def make_parser():
                 if not inspect.isabstract(cls):
                     def parse_action(s, loc, tocs):
                         return cls(*tocs)
-
                     parser.setParseAction(parse_action)
 
     for var_name, value in locals().copy().items():
@@ -124,10 +111,8 @@ def make_parser():
     return start
 
 
-parser = make_parser()
+parser = _make_parser()
 
 
 def parse(prog: str) -> StmtListNode:
     return parser.parseString(str(prog))[0]
-
-
