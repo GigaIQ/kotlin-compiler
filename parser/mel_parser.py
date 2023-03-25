@@ -17,11 +17,9 @@ def _make_parser():
     VAR = pp.Keyword('var')
     VAL = pp.Keyword('val')
     FUN = pp.Keyword('fun')
-    BIT_AND = pp.Keyword('and')
-    BIT_OR = pp.Keyword('or')
     UNTIL, DOWNTO, STEP = pp.Keyword('until'), pp.Keyword('downTo'), pp.Keyword('step').suppress()
     IN = pp.Keyword('in')
-    keywords = IF | FOR | WHILE | DO | RETURN | VAR | VAL | FUN | BIT_AND | BIT_OR | UNTIL | DOWNTO | IN
+    keywords = IF | FOR | WHILE | DO | RETURN | VAR | VAL | FUN | UNTIL | DOWNTO | IN
     SEMI, COMMA, COLON, DOTS = pp.Literal(';').suppress(), pp.Literal(',').suppress(), pp.Literal(':'), pp.Literal('..')
 
     num = pp.Regex('[+-]?\\d+\\.?\\d*([eE][+-]?\\d+)?')
@@ -36,20 +34,15 @@ def _make_parser():
     LPAR, RPAR = pp.Literal('(').suppress(), pp.Literal(')').suppress()
     LBRACK, RBRACK = pp.Literal("[").suppress(), pp.Literal("]").suppress()
     LBRACE, RBRACE = pp.Literal("{").suppress(), pp.Literal("}").suppress()
-    LANGLE, RANGLE = pp.Literal("<").suppress(), pp.Literal(">").suppress()
-    type_ << (ident.copy() + pp.Optional(LANGLE + type_ + RANGLE)).setName('type')
+    type_ << ident.setName('type')
     ASSIGN = pp.Literal('=')
 
     ADD, SUB = pp.Literal('+'), pp.Literal('-')
-    SADD, SSUB = pp.Literal('+='), pp.Literal('-=')
     MUL, DIV, MOD = pp.Literal('*'), pp.Literal('/'), pp.Literal('%')
-    SMUL, SDIV, SMOD = pp.Literal('*='), pp.Literal('/='), pp.Literal('%=')
     AND = pp.Literal('&&')
     OR = pp.Literal('||')
     GE, LE, GT, LT = pp.Literal('>='), pp.Literal('<='), pp.Literal('>'), pp.Literal('<')
     NEQUALS, EQUALS = pp.Literal('!='), pp.Literal('==')
-
-    NE = pp.Literal('!').setName('sin_op')
 
     add = pp.Forward()
     expr = pp.Forward()
@@ -69,8 +62,8 @@ def _make_parser():
     seq = pp.Group(add + pp.Optional((DOTS | UNTIL | DOWNTO) + add + pp.Optional(STEP + expr))).setName('bin_op')
     compare1 = pp.Group(seq + pp.Optional((GE | LE | GT | LT) + seq)).setName('bin_op')
     compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NEQUALS) + compare1)).setName('bin_op')
-    logical_and = pp.Group(compare2 + pp.ZeroOrMore(AND | BIT_AND + compare2)).setName('bin_op')
-    logical_or = pp.Group(logical_and + pp.ZeroOrMore(OR | BIT_OR + logical_and)).setName('bin_op')
+    logical_and = pp.Group(compare2 + pp.ZeroOrMore(AND + compare2)).setName('bin_op')
+    logical_or = pp.Group(logical_and + pp.ZeroOrMore(OR + logical_and)).setName('bin_op')
 
     expr << logical_or
 
@@ -81,7 +74,7 @@ def _make_parser():
     assign = ident + ASSIGN.suppress() + expr
     simple_stmt = assign | call
 
-    self_operators = pp.Group(ident + pp.Optional((SADD | SSUB | SMUL | SDIV | SMOD) + expr)).setName('bin_op')
+    self_operators = pp.Group(ident + expr).setName('bin_op')
     if_ = IF.suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else").suppress() + stmt)
     for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
     while_ = WHILE.suppress() + LPAR + expr + RPAR + stmt
@@ -100,8 +93,8 @@ def _make_parser():
             do_while |
             while_ |
             return_ |
-            simple_stmt + pp.Optional(SEMI) |
-            var_ + pp.Optional(SEMI) |
+            simple_stmt |
+            var_ |
             composite |
             func |
             self_operators
