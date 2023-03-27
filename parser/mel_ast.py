@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 from typing import Optional, Union, Tuple, Callable
 
+
 class AstNode(ABC):
     """Базовый абстрактый класс узла AST-дерева
     """
@@ -119,45 +120,6 @@ class TypeNode(IdentNode):
         return (self.generic, ) if self.generic else []
 
 
-class SinOpNode(ExprNode):
-    """Класс для представления в AST-дереве бинарных операций
-    """
-
-    def __init__(self,  arg: ExprNode,
-                 row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
-        super().__init__(row=row, col=col, **props)
-        self.arg = arg
-
-    def __str__(self) -> str:
-        return str(self.op.value)
-
-    @property
-    def childs(self) -> Tuple[ExprNode]:
-        return self.arg,
-
-
-class SeqNode(ExprNode):
-    """Класс для представления в AST-дереве бинарных операций
-    """
-
-    def __init__(self, startArg: ExprNode, seqOp: str, endArg: ExprNode,
-                 stepArg: ExprNode = None,
-                 row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
-        super().__init__(row=row, col=col, **props)
-        self.startArg = startArg
-        self.seqOp = seqOp
-        self.endArg = endArg
-        self.stepArg = stepArg
-
-    def __str__(self) -> str:
-        return 'seq'
-
-    @property
-    def childs(self) -> Tuple[ExprNode, ExprNode]:
-        return [self.startArg, self.seqOp, self.endArg] + [self.stepArg] if self.stepArg is not None else []
-
-
-
 class CallNode(ExprNode):
     """Класс для представления в AST-дереве вызова функций
        (в языке программирования может быть как expression, так и statement)
@@ -195,32 +157,6 @@ class BinOp(ExprNode):
         return (_GroupNode(str(self.type), self.expr), )
 
 
-# def type_convert(expr: ExprNode, type_: TypeDesc, except_node: Optional[AstNode] = None, comment: Optional[str] = None) -> ExprNode:
-#     """Метод преобразования ExprNode узла AST-дерева к другому типу
-#     :param expr: узел AST-дерева
-#     :param type_: требуемый тип
-#     :param except_node: узел, о которого будет исключение
-#     :param comment: комментарий
-#     :return: узел AST-дерева c операцией преобразования
-#     """
-#
-#     if expr.node_type is None:
-#         except_node.semantic_error('Тип выражения не определен')
-#     if type_ is None:
-#         except_node.node_type = expr.node_type
-#         except_node.type = TypeNode(except_node.node_type.base_type)
-#         return expr
-#     if expr.node_type == type_:
-#         return expr
-#     if expr.node_type.is_simple and type_.is_simple and \
-#             expr.node_type.base_type in TYPE_CONVERTIBILITY and type_.base_type in TYPE_CONVERTIBILITY[expr.node_type.base_type]:
-#         return BinOp(expr, type_)
-#     else:
-#         (except_node if except_node else expr).semantic_error('Тип {0}{2} не конвертируется в {1}'.format(
-#             expr.node_type, type_, ' ({})'.format(comment) if comment else ''
-#         ))
-
-
 class StmtNode(ExprNode, ABC):
     """Абстракный класс для деклараций или инструкций в AST-дереве
     """
@@ -245,24 +181,6 @@ class AssignNode(ExprNode):
     @property
     def childs(self) -> Tuple[IdentNode, ExprNode]:
         return self.var, self.val
-
-
-class VarsNode(StmtNode):
-    """Класс для представления в AST-дереве объявления переменнных
-    """
-
-    def __init__(self, type_: TypeNode, *vars_: Union[IdentNode, 'AssignNode'],
-                 row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
-        super().__init__(row=row, col=col, **props)
-        self.type = type_
-        self.vars = vars_
-
-    def __str__(self) -> str:
-        return str(self.type)
-
-    @property
-    def childs(self) -> Tuple[AstNode, ...]:
-        return self.vars
 
 
 class VarNode(StmtNode):
@@ -335,23 +253,13 @@ class ReturnNode(StmtNode):
         return (self.val, ) if self.val is not None else ()
 
 
-class IfNode(StmtNode):
-    """Класс для представления в AST-дереве условного оператора
-    """
-
-    def __init__(self, cond: ExprNode, then_stmt: StmtNode, else_stmt: Optional[StmtNode] = None,
-                 row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
-        super().__init__(row=row, col=col, **props)
+class IfNode(StmtNode, ABC):
+    def __init__(self, cond: ExprNode, then_stmt: StmtNode, else_stmt: Optional[StmtNode] = None):
+        super().__init__()
         self.cond = cond
         self.then_stmt = then_stmt
         self.else_stmt = else_stmt
 
-    def __str__(self) -> str:
-        return 'if'
-
-    @property
-    def childs(self) -> Tuple[ExprNode, StmtNode, Optional[StmtNode]]:
-        return (self.cond, self.then_stmt, *((self.else_stmt,) if self.else_stmt else tuple()))
 
 class ForNode(StmtNode):
     """Класс для представления в AST-дереве цикла for
@@ -389,23 +297,6 @@ class WhileNode(StmtNode):
     def childs(self) -> Tuple[AstNode, ...]:
         return self.condition, self.body
 
-class DoWhileNode(StmtNode):
-    """Класс для представления в AST-дереве цикла while
-    """
-
-    def __init__(self, body: StmtNode, condition: ExprNode,
-                 row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
-        super().__init__(row=row, col=col, **props)
-        self.condition = condition
-        self.body = body
-
-    def __str__(self) -> str:
-        return 'do while'
-
-    @property
-    def childs(self) -> Tuple[AstNode, ...]:
-        return self.condition, self.body
-
 
 class ParamNode(StmtNode):
     """Класс для представления в AST-дереве объявления параметра функции
@@ -427,6 +318,7 @@ class ParamNode(StmtNode):
         if self.value is not None:
             childs.append(self.value)
         return childs
+
 
 class FuncNode(StmtNode):
     """Класс для представления в AST-дереве объявления функции

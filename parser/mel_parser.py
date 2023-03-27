@@ -10,19 +10,14 @@ def _make_parser():
     IF = pp.Keyword('if')
     FOR = pp.Keyword('for')
     WHILE = pp.Keyword('while')
-    DO = pp.Keyword('do')
     RETURN = pp.Keyword('return')
     VAR = pp.Keyword('var')
     VAL = pp.Keyword('val')
     FUN = pp.Keyword('fun')
-    BIT_AND = pp.Keyword('and')
-    BIT_OR = pp.Keyword('or')
-    UNTIL, DOWNTO, STEP = pp.Keyword('until'), pp.Keyword('downTo'), pp.Keyword('step').suppress()
     IN = pp.Keyword('in')
-    keywords = IF | FOR | WHILE | DO | RETURN | VAR | VAL | FUN | BIT_AND | BIT_OR | UNTIL | DOWNTO | IN
+    keywords = IF | FOR | WHILE | RETURN | VAR | VAL | FUN | IN
     SEMI, COMMA, COLON, DOTS = pp.Literal(';').suppress(), pp.Literal(',').suppress(), pp.Literal(':'), pp.Literal('..')
 
-    # num = ppc.fnumber.copy().setParseAction(lambda s, loc, tocs: tocs[0])
     num = pp.Regex('[+-]?\\d+\\.?\\d*([eE][+-]?\\d+)?')
     # c escape-последовательностями как-то неправильно работает
     str_ = pp.QuotedString('"', escChar='\\', unquoteResults=False, convertWhitespaceEscapes=False)
@@ -35,18 +30,16 @@ def _make_parser():
     LPAR, RPAR = pp.Literal('(').suppress(), pp.Literal(')').suppress()
     LBRACK, RBRACK = pp.Literal("[").suppress(), pp.Literal("]").suppress()
     LBRACE, RBRACE = pp.Literal("{").suppress(), pp.Literal("}").suppress()
-    LANGLE, RANGLE = pp.Literal("<").suppress(), pp.Literal(">").suppress()
-    type_ << (ident.copy() + pp.Optional(LANGLE + type_ + RANGLE)).setName('type')
+
+    type_ << (ident.copy() + pp.Optional(type_)).setName('type')
     ASSIGN = pp.Literal('=')
 
     ADD, SUB = pp.Literal('+'), pp.Literal('-')
-    SADD, SSUB = pp.Literal('+='), pp.Literal('-=')
-    MUL, DIV, MOD = pp.Literal('*'), pp.Literal('/'), pp.Literal('%')
-    SMUL, SDIV, SMOD = pp.Literal('*='), pp.Literal('/='), pp.Literal('%=')
+    MUL, DIV = pp.Literal('*'), pp.Literal('/')
     AND = pp.Literal('&&')
     OR = pp.Literal('||')
     GE, LE, GT, LT = pp.Literal('>='), pp.Literal('<='), pp.Literal('>'), pp.Literal('<')
-    NEQUALS, EQUALS = pp.Literal('!='), pp.Literal('==')
+    NOT_EQUALS, EQUALS = pp.Literal('!='), pp.Literal('==')
 
     NE = pp.Literal('!').setName('sin_op')
 
@@ -66,16 +59,16 @@ def _make_parser():
     # обязательно везде pp.Group, иначе приоритет операций не будет работать (см. реализцию set_parse_action_magic);
     # также можно воспользоваться pp.operatorPrecedence (должно быть проще, но не проверял)
 
-    mult = pp.Group(group + pp.ZeroOrMore((MUL | DIV | MOD) + group)).setName('bin_op')
+    mult = pp.Group(group + pp.ZeroOrMore((MUL | DIV) + group)).setName('bin_op')
     add << pp.Group(mult + pp.ZeroOrMore((ADD | SUB) + mult)).setName('bin_op')
-    seq = pp.Group(add + pp.Optional((DOTS | UNTIL | DOWNTO) + add + pp.Optional(STEP + expr))).setName('bin_op')
+    seq = pp.Group(add + pp.Optional(DOTS + add + pp.Optional(expr))).setName('bin_op')
     compare1 = pp.Group(seq + pp.Optional((GE | LE | GT | LT) + seq)).setName(
         'bin_op')  # GE и LE первыми, т.к. приоритетный выбор
-    compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NEQUALS) + compare1)).setName('bin_op')
-    logical_and = pp.Group(compare2 + pp.ZeroOrMore(AND | BIT_AND + compare2)).setName('bin_op')
-    logical_or = pp.Group(logical_and + pp.ZeroOrMore(OR | BIT_OR + logical_and)).setName('bin_op')
+    compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NOT_EQUALS) + compare1)).setName('bin_op')
+    logical_and = pp.Group(compare2 + pp.ZeroOrMore(AND + compare2)).setName('bin_op')
+    logical_or = pp.Group(logical_and + pp.ZeroOrMore(OR + logical_and)).setName('bin_op')
 
-    expr << (logical_or)
+    expr << logical_or
 
     simple_assign = (ident + ASSIGN.suppress() + expr).setName('assign')
     var_ = (VAR | VAL) + ((ident + COLON + type_ + pp.Optional(ASSIGN.suppress() + expr)) |
@@ -84,22 +77,16 @@ def _make_parser():
     assign = ident + ASSIGN.suppress() + expr
     simple_stmt = assign | call
 
-    # for_stmt_list0 = (pp.Optional(simple_stmt + pp.ZeroOrMore(COMMA + simple_stmt))).setName('stmt_list')
-    # for_stmt_list = var_ | for_stmt_list0
-    # for_cond = expr | pp.Group(pp.empty).setName('stmt_list')
-    # for_body = stmt | pp.Group(SEMI).setName('stmt_list')
-
-    self_operators = pp.Group(ident + pp.Optional((SADD | SSUB | SMUL | SDIV | SMOD) + expr)).setName('bin_op')
+    self_operators = pp.Group(ident + pp.Optional(expr)).setName('bin_op')
     if_ = IF.suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else").suppress() + stmt)
-    # for_ = FOR.suppress() + LPAR + for_stmt_list + SEMI + for_cond + SEMI + for_stmt_list + RPAR + for_body
+
     for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
     while_ = WHILE.suppress() + LPAR + expr + RPAR + stmt
-    do_while = DO.suppress() + stmt + WHILE.suppress() + LPAR + expr + RPAR
     return_ = RETURN.suppress() + pp.Optional(expr)
+
     composite = LBRACE + stmt_list + RBRACE
 
     param = ident + COLON.suppress() + type_
-    # param_def = (ident + COLON.suppress() + type_ + ASSIGN.suppress() + expr).setName('param')
     params = param + pp.ZeroOrMore(COMMA + param)
     func = FUN.suppress() + ident + LPAR + pp.Optional(params) + RPAR + pp.Optional(
         COLON.suppress() + type_) + LBRACE + stmt_list + RBRACE
@@ -107,12 +94,9 @@ def _make_parser():
     stmt << (
             if_ |
             for_ |
-            do_while |
             while_ |
             return_ |
             simple_stmt + pp.Optional(SEMI) |
-            # обязательно ниже if, for и т.п., иначе считает их за типы данных (сейчас уже не считает - см. грамматику)
-            #             # обязательно выше vars, иначе посчитает за два vars
             var_ + pp.Optional(SEMI) |
             composite |
             func |
