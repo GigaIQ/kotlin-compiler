@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Tuple, Optional, Union, List, cast
+from typing import Callable, Tuple, Optional, Any, List
 from enum import Enum
-
-from pip._internal.utils.misc import enum
 
 
 class AstNode(ABC):
@@ -69,6 +67,7 @@ class BinOp(Enum):
     SUB = '-'
     MUL = '*'
     DIV = '/'
+    MOD = '%'
     GE = '>='
     LE = '<='
     NEQUALS = '<>'
@@ -115,12 +114,32 @@ class TypeNode(IdentNode):
         return []
 
 
+class Decl(Enum):
+    VAR = 'var'
+    VAL = 'val'
+
+
+class AssignNode(StmtNode):
+    def __init__(self, var: Decl, val: ExprNode,
+                 row: Optional[int] = None, line: Optional[int] = None, **props):
+        super().__init__(row=row, line=line, **props)
+        self.var = var
+        self.val = val
+
+    @property
+    def childs(self) -> Tuple[IdentNode, ExprNode]:
+        return self.var, self.val
+
+    def __str__(self) -> str:
+        return '='
+
+
 class VarNode(StmtNode):
-    def __init__(self, *params,
+    def __init__(self, declare: Decl, *params,
                  row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
         super().__init__(row=row, col=col, **props)
-        self.declare = params[0]
-        params = params[1:]
+        self.declare = declare
+        params = params[0:]
         sep = params[1]
         self.ident = params[0]
         self.type = None
@@ -131,7 +150,7 @@ class VarNode(StmtNode):
             self.var = params[1]
 
     def __str__(self) -> str:
-        return self.declare
+        return str(self.declare)
 
     @property
     def childs(self) -> Tuple[AstNode, ...]:
@@ -142,6 +161,42 @@ class VarNode(StmtNode):
         if self.var is not None:
             childs.append(self.var)
         return childs
+
+
+class ParamNode(StmtNode):
+    def __init__(self, name: IdentNode, type_: TypeNode, expr: ExprNode = None,
+                 row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
+        super().__init__(row=row, col=col, **props)
+        self.type = type_
+        self.name = name
+        self.value = expr
+
+    def __str__(self) -> str:
+        return str(self.type)
+
+    @property
+    def childs(self):
+        childs = [self.name]
+        if self.value is not None:
+            childs.append(self.value)
+        return childs
+
+
+class FuncDeclNode(StmtNode):
+    def __init__(self, type_: IdentNode, name: IdentNode, params: ParamNode, body: StmtNode,
+                 row: Optional[int] = None, col: Optional[int] = None, **props) -> None:
+        super().__init__(row=row, col=col, **props)
+        self.type = type_
+        self.name = name
+        self.params = params
+        self.body = body
+
+    def __str__(self) -> str:
+        return 'function'
+
+    @property
+    def childs(self) -> tuple[IdentNode, IdentNode, ParamNode, StmtNode]:
+        return self.type, self.name, self.params, self.body
 
 
 class CallNode(StmtNode):
@@ -158,24 +213,8 @@ class CallNode(StmtNode):
         return 'call'
 
 
-class AssignNode(StmtNode):
-    def __init__(self, var: IdentNode, val: ExprNode,
-                 row: Optional[int] = None, line: Optional[int] = None, **props):
-        super().__init__(row=row, line=line, **props)
-        self.var = var
-        self.val = val
-
-    @property
-    def childs(self) -> Tuple[IdentNode, ExprNode]:
-        return self.var, self.val
-
-    def __str__(self) -> str:
-        return '='
-
-
 class IfNode(StmtNode):
-    def __init__(self, cond: ExprNode, then_stmt: StmtNode, else_stmt: Optional[StmtNode] = None,
-                 row: Optional[int] = None, line: Optional[int] = None, **props):
+    def __init__(self, cond: ExprNode, then_stmt: StmtNode, else_stmt: Optional[StmtNode] = None):
         super().__init__()
         self.cond = cond
         self.then_stmt = then_stmt

@@ -10,16 +10,12 @@ from mel_ast import *
 
 def _make_parser():
     IF = pp.Keyword('if')
-    FOR = pp.Keyword('for')
     WHILE = pp.Keyword('while')
-    DO = pp.Keyword('do')
     RETURN = pp.Keyword('return')
     VAR = pp.Keyword('var')
     VAL = pp.Keyword('val')
     FUN = pp.Keyword('fun')
-    UNTIL, DOWNTO, STEP = pp.Keyword('until'), pp.Keyword('downTo'), pp.Keyword('step').suppress()
-    IN = pp.Keyword('in')
-    keywords = IF | FOR | WHILE | DO | RETURN | VAR | VAL | FUN | UNTIL | DOWNTO | IN
+    keywords = IF | WHILE | RETURN | VAR | VAL | FUN
     SEMI, COMMA, COLON, DOTS = pp.Literal(';').suppress(), pp.Literal(',').suppress(), pp.Literal(':'), pp.Literal('..')
 
     num = pp.Regex('[+-]?\\d+\\.?\\d*([eE][+-]?\\d+)?')
@@ -59,7 +55,7 @@ def _make_parser():
 
     mult = pp.Group(group + pp.ZeroOrMore((MUL | DIV | MOD) + group)).setName('bin_op')
     add << pp.Group(mult + pp.ZeroOrMore((ADD | SUB) + mult)).setName('bin_op')
-    seq = pp.Group(add + pp.Optional((DOTS | UNTIL | DOWNTO) + add + pp.Optional(STEP + expr))).setName('bin_op')
+    seq = pp.Group(add + pp.Optional(DOTS + add + pp.Optional(expr))).setName('bin_op')
     compare1 = pp.Group(seq + pp.Optional((GE | LE | GT | LT) + seq)).setName('bin_op')
     compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NEQUALS) + compare1)).setName('bin_op')
     logical_and = pp.Group(compare2 + pp.ZeroOrMore(AND + compare2)).setName('bin_op')
@@ -74,33 +70,28 @@ def _make_parser():
     assign = ident + ASSIGN.suppress() + expr
     simple_stmt = assign | call
 
-    self_operators = pp.Group(ident + expr).setName('bin_op')
     if_ = IF.suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else").suppress() + stmt)
-    for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
+    # for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
     while_ = WHILE.suppress() + LPAR + expr + RPAR + stmt
-    do_while = DO.suppress() + stmt + WHILE.suppress() + LPAR + expr + RPAR
     return_ = RETURN.suppress() + pp.Optional(expr)
-    composite = LBRACE + stmt_list + RBRACE
+    comp_op = LBRACE + stmt_list + RBRACE
 
     param = ident + COLON.suppress() + type_
     params = param + pp.ZeroOrMore(COMMA + param)
-    func = FUN.suppress() + ident + LPAR + pp.Optional(params) + RPAR + pp.Optional(
+    func_decl = FUN.suppress() + ident + LPAR + pp.Optional(params) + RPAR + pp.Optional(
         COLON.suppress() + type_) + LBRACE + stmt_list + RBRACE
 
     stmt << (
             if_ |
-            for_ |
-            do_while |
             while_ |
             return_ |
             simple_stmt |
             var_ |
-            composite |
-            func |
-            self_operators
+            comp_op |
+            func_decl
     )
 
-    stmt_list << (pp.ZeroOrMore(stmt + pp.ZeroOrMore(SEMI)))
+    stmt_list << (pp.ZeroOrMore(stmt))
 
     program = stmt_list.ignore(pp.cStyleComment).ignore(pp.dblSlashComment) + pp.StringEnd()
 
