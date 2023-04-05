@@ -10,8 +10,11 @@ from mel_ast import *
 
 def _make_parser():
     IF = pp.Keyword('if')
+    ELSE = pp.Keyword('else')
     WHILE = pp.Keyword('while')
     RETURN = pp.Keyword('return')
+    FOR = pp.Keyword('for')
+    IN = pp.Keyword('in')
     VAR = pp.Keyword('var')
     VAL = pp.Keyword('val')
     FUN = pp.Keyword('fun')
@@ -30,7 +33,7 @@ def _make_parser():
     LPAR, RPAR = pp.Literal('(').suppress(), pp.Literal(')').suppress()
     LBRACK, RBRACK = pp.Literal("[").suppress(), pp.Literal("]").suppress()
     LBRACE, RBRACE = pp.Literal("{").suppress(), pp.Literal("}").suppress()
-    type_ << ident.setName('type')
+    type_ << ident
     ASSIGN = pp.Literal('=')
 
     ADD, SUB = pp.Literal('+'), pp.Literal('-')
@@ -70,9 +73,9 @@ def _make_parser():
     assign = ident + ASSIGN.suppress() + expr
     simple_stmt = assign | call
 
-    if_ = IF.suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else").suppress() + stmt)
-    # for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
+    if_ = IF.suppress() + LPAR + expr + RPAR + stmt + pp.Optional(ELSE.suppress() + stmt)
     while_ = WHILE.suppress() + LPAR + expr + RPAR + stmt
+    for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
     return_ = RETURN.suppress() + pp.Optional(expr)
     comp_op = LBRACE + stmt_list + RBRACE
 
@@ -84,6 +87,7 @@ def _make_parser():
     stmt << (
             if_ |
             while_ |
+            for_ |
             return_ |
             simple_stmt |
             var_ |
