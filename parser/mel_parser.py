@@ -29,8 +29,9 @@ def _make_parser():
 
     LPAR, RPAR = pp.Literal('(').suppress(), pp.Literal(')').suppress()
     LBRACK, RBRACK = pp.Literal("[").suppress(), pp.Literal("]").suppress()
+    LANGLE, RANGLE = pp.Literal("<").suppress(), pp.Literal(">").suppress()
     LBRACE, RBRACE = pp.Literal("{").suppress(), pp.Literal("}").suppress()
-    type_ << ident.setName('type')
+    type_ << (ident.copy() + pp.Optional(LANGLE + type_ + RANGLE)).setName('type')
     ASSIGN = pp.Literal('=')
 
     ADD, SUB = pp.Literal('+'), pp.Literal('-')
