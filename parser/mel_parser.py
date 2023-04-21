@@ -1,5 +1,4 @@
 import inspect
-from contextlib import suppress
 
 import pyparsing as pp
 from pyparsing import pyparsing_common as ppc
@@ -7,87 +6,108 @@ from pyparsing import pyparsing_common as ppc
 from mel_ast import *
 
 
-def make_parser():
+def _make_parser():
+    IF = pp.Keyword('if')
+    FOR = pp.Keyword('for')
+    WHILE = pp.Keyword('while')
+    RETURN = pp.Keyword('return')
+    VAR = pp.Keyword('var')
+    VAL = pp.Keyword('val')
+    FUN = pp.Keyword('fun')
+    IN = pp.Keyword('in')
+    keywords = IF | FOR | WHILE | RETURN | VAR | VAL | FUN | IN
+    SEMI, COMMA, COLON, DOTS = pp.Literal(';').suppress(), pp.Literal(',').suppress(), pp.Literal(':'), pp.Literal('..')
+
     num = pp.Regex('[+-]?\\d+\\.?\\d*([eE][+-]?\\d+)?')
+    # c escape-последовательностями как-то неправильно работает
     str_ = pp.QuotedString('"', escChar='\\', unquoteResults=False, convertWhitespaceEscapes=False)
-    literal = num | str_
-    bool_val = pp.Literal("true") | pp.Literal("false")
-    literal = num | bool_val
-    ident = ppc.identifier.setName('ident')
-
-    INT = pp.Keyword("Integer").suppress()
-    CHAR = pp.Keyword("Char").suppress()
-    BOOL = pp.Keyword("Boolean").suppress()
-
-    VAR = pp.Keyword("var").suppress()
-    VAL = pp.Keyword("val").suppress()
-
-    type_spec = INT | BOOL | CHAR
-
-    ADD = pp.Keyword("+").suppress()
-    SUB = pp.Keyword("-").suppress()
-    MUL = pp.Keyword("*").suppress()
-    DIV = pp.Keyword("/").suppress()
-    AND = pp.Keyword("&&").suppress()
-    OR = pp.Keyword("||").suppress()
-    GE = pp.Keyword(">=").suppress()
-    LE = pp.Keyword("<=").suppress()
-    NEQUALS = pp.Keyword("!=").suppress()
-    EQUALS = pp.Keyword("==").suppress()
-    GT = pp.Keyword(">").suppress()
-    LT = pp.Keyword("<").suppress()
+    bool_ = pp.Regex('true|false')
+    literal = num | str_ | bool_
+    # только, чтобы показать, ~keywords здесь не нужен
+    ident = (~keywords + ppc.identifier.copy()).setName('ident')
+    type_ = pp.Forward()
 
     LPAR, RPAR = pp.Literal('(').suppress(), pp.Literal(')').suppress()
     LBRACK, RBRACK = pp.Literal("[").suppress(), pp.Literal("]").suppress()
     LBRACE, RBRACE = pp.Literal("{").suppress(), pp.Literal("}").suppress()
 
+    type_ << (ident.copy() + pp.Optional(type_)).setName('type')
     ASSIGN = pp.Literal('=')
 
-    type_ = pp.Forward()
+    ADD, SUB = pp.Literal('+'), pp.Literal('-')
+    MUL, DIV = pp.Literal('*'), pp.Literal('/')
+    AND = pp.Literal('&&')
+    OR = pp.Literal('||')
+    GE, LE, GT, LT = pp.Literal('>='), pp.Literal('<='), pp.Literal('>'), pp.Literal('<')
+    NOT_EQUALS, EQUALS = pp.Literal('!='), pp.Literal('==')
+
+    NE = pp.Literal('!').setName('sin_op')
+
+    add = pp.Forward()
+    expr = pp.Forward()
     stmt = pp.Forward()
     stmt_list = pp.Forward()
-    expr = pp.Forward()
 
+    call = ident + LPAR + pp.Optional(expr + pp.ZeroOrMore(COMMA + expr)) + RPAR
     group = (
-        num |
-        str_ |
-        ident |
-        LPAR + expr + RPAR
+            literal |
+            call |  # обязательно перед ident, т.к. приоритетный выбор (или использовать оператор ^ вместо | )
+            ident |
+            LPAR + expr + RPAR
     )
 
-    mult = group + pp.ZeroOrMore(MUL | DIV + group).setName("bin_op")
-    add = mult + pp.ZeroOrMore(ADD | SUB + mult).setName("bin_op")
+    # обязательно везде pp.Group, иначе приоритет операций не будет работать (см. реализцию set_parse_action_magic);
+    # также можно воспользоваться pp.operatorPrecedence (должно быть проще, но не проверял)
 
-    compare1 = pp.Group(add + pp.Optional((GE | LE | GT | LT) + add)).setName('bin_op')
-    compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NEQUALS) + compare1)).setName('bin_op')
+    mult = pp.Group(group + pp.ZeroOrMore((MUL | DIV) + group)).setName('bin_op')
+    add << pp.Group(mult + pp.ZeroOrMore((ADD | SUB) + mult)).setName('bin_op')
+    seq = pp.Group(add + pp.Optional(DOTS + add + pp.Optional(expr))).setName('bin_op')
+    compare1 = pp.Group(seq + pp.Optional((GE | LE | GT | LT) + seq)).setName(
+        'bin_op')  # GE и LE первыми, т.к. приоритетный выбор
+    compare2 = pp.Group(compare1 + pp.Optional((EQUALS | NOT_EQUALS) + compare1)).setName('bin_op')
     logical_and = pp.Group(compare2 + pp.ZeroOrMore(AND + compare2)).setName('bin_op')
     logical_or = pp.Group(logical_and + pp.ZeroOrMore(OR + logical_and)).setName('bin_op')
 
     expr << logical_or
 
-    stmt_group = LBRACE + stmt_list + RBRACE
+    simple_assign = (ident + ASSIGN.suppress() + expr).setName('assign')
+    var_ = (VAR | VAL) + ((ident + COLON + type_ + pp.Optional(ASSIGN.suppress() + expr)) |
+                          (ident + pp.Optional(ASSIGN.suppress() + expr)))
 
-    type_ << ident
+    assign = ident + ASSIGN.suppress() + expr
+    simple_stmt = assign | call
 
-    var_type = ident + pp.Keyword(":").suppress() + type_
+    self_operators = pp.Group(ident + pp.Optional(expr)).setName('bin_op')
+    if_ = IF.suppress() + LPAR + expr + RPAR + stmt + pp.Optional(pp.Keyword("else").suppress() + stmt)
 
-    assing = ident + ASSIGN + expr
+    for_ = FOR.suppress() + LPAR + ident + IN.suppress() + expr + RPAR + stmt
+    while_ = WHILE.suppress() + LPAR + expr + RPAR + stmt
+    return_ = RETURN.suppress() + pp.Optional(expr)
 
-    var_decl = VAR + var_type + ASSIGN + expr
+    composite = LBRACE + stmt_list + RBRACE
 
-    simple_stmt = assing
+    param = ident + COLON.suppress() + type_
+    params = param + pp.ZeroOrMore(COMMA + param)
+    func = FUN.suppress() + ident + LPAR + pp.Optional(params) + RPAR + pp.Optional(
+        COLON.suppress() + type_) + LBRACE + stmt_list + RBRACE
 
     stmt << (
-        var_decl
-        | simple_stmt
+            if_ |
+            for_ |
+            while_ |
+            return_ |
+            simple_stmt + pp.Optional(SEMI) |
+            var_ + pp.Optional(SEMI) |
+            composite |
+            func |
+            self_operators
     )
 
-    stmt_list = pp.ZeroOrMore(stmt)
+    stmt_list << (pp.ZeroOrMore(stmt + pp.ZeroOrMore(SEMI)))
 
     program = stmt_list.ignore(pp.cStyleComment).ignore(pp.dblSlashComment) + pp.StringEnd()
 
     start = program
-
 
     def set_parse_action_magic(rule_name: str, parser: pp.ParserElement) -> None:
         if rule_name == rule_name.upper():
@@ -103,7 +123,7 @@ def make_parser():
                     secondNode = tocs[i + 1]
                     if not isinstance(secondNode, AstNode):
                         secondNode = bin_op_parse_action(s, loc, secondNode)
-                    node = BinOpNode(BinOp(tocs[i]), node, secondNode)
+                    node = BinOpNode(BinOp(tocs[i]), node, secondNode, loc=loc)
                 return node
 
             parser.setParseAction(bin_op_parse_action)
@@ -113,7 +133,13 @@ def make_parser():
                 cls = eval(cls)
                 if not inspect.isabstract(cls):
                     def parse_action(s, loc, tocs):
-                        return cls(*tocs)
+                        if cls is FuncNode:
+                            if isinstance(tocs[-2], TypeNode):
+                                return FuncNode(tocs[-2], tocs[0], tocs[1:-2], tocs[-1], loc=loc)
+                            else:
+                                return FuncNode(None, tocs[0], tocs[1:-1], tocs[-1], loc=loc)
+                        else:
+                            return cls(*tocs, loc=loc)
 
                     parser.setParseAction(parse_action)
 
@@ -124,10 +150,34 @@ def make_parser():
     return start
 
 
-parser = make_parser()
+parser = _make_parser()
 
 
 def parse(prog: str) -> StmtListNode:
-    return parser.parseString(str(prog))[0]
+    locs = []
+    row, col = 0, 0
+    for ch in prog:
+        if ch == '\n':
+            row += 1
+            col = 0
+        elif ch == '\r':
+            pass
+        else:
+            col += 1
+        locs.append((row, col))
 
+    old_init_action = AstNode.init_action
 
+    def init_action(node: AstNode) -> None:
+        loc = getattr(node, 'loc', None)
+        if isinstance(loc, int):
+            node.row = locs[loc][0] + 1
+            node.col = locs[loc][1] + 1
+
+    AstNode.init_action = init_action
+    try:
+        prog: StmtListNode = parser.parseString(str(prog))[0]
+        prog.program = True
+        return prog
+    finally:
+        AstNode.init_action = old_init_action
